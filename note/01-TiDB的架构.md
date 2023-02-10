@@ -69,3 +69,24 @@ Region本身是副本存储的，可以看成Kafka的Partition，包含Leader和
 TiDB的数据写入不是以一条KV为单位的，如果一条一条地写入，Region之间的数据同步、网络IO会非常频繁。**因此TiDB的主从同步，以Region为单位**。
 
 TiDB采用RocksDB作为存储引擎，将Region的数据刷盘到磁盘，保证最终的持久性。
+
+# 5-分布式SQL在TiDB的执行逻辑（2的补充）
+
+![05](01-TiDB的架构.assets/05.png)
+
+比方说执行SELECT COUNT(*) FROM t1 WHERE category_id = 1; TiDB Server在语法解析、逻辑优化、物理优化后，会走这样流程：
+
+1. 先问PD Cluster，这些数据会在哪些Region（TiKV）。因为catetory_id是比较普遍的字段，并不能代表某行记录的唯一性，因此这些记录往往存在于不同Region内。
+2. TiDB Server的Distributed Executor会并行地请求这些Region，每个TiKV根据条件得出结果值，返回给TiDB Server
+3. TiDB Server将不同TiKV的值进行汇总，形成最终的结果值，返回给客户端。
+
+# 6-PD Server的作用
+
+![06](01-TiDB的架构.assets/06.png)
+
+1. 其实上面也讲过了，TiDB Server作为无状态的服务，本身不存储数据。Storage Cluster作为有状态的服务，实际存储数据。而PD Cluster则是无状态 到 有状态过度的一个桥梁。
+
+2. 它不仅存储着整个TiDB集群的元数据，还存储着TiKV数据的**实时**分布情况（注意这个实时，到底是AP还是CP，要留个坑）、分配分布式事务ID等全局功能。
+
+3. 并且还会根据TiKV实时上报的数据分布情况，给TiKV下发实时的数据调度命令。
+4. 可以说，客户端操作TiDB的命令，基本都会经过PD Server的处理。
