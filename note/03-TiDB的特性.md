@@ -127,3 +127,17 @@ CREATE TABLE test.hash_table (condition int) PARTITION BY HASH(condition) PARTIT
 
 此时写入数据，会根据condition的值进行哈希运算，将哈希值与4进行取余散列，确定存放的Partition（Region）。
 
+# 9-事务
+
+TiDB的事务和MySQL没什么区别，但TiDB仅支持RC和RR隔离级别，并且TiDB拥有**因果一致性事务**、**悲观事务**、**乐观事务**的特性。
+
+TiDB开始事务时，会从PD获取TSO，TiDB结束事务时，会从PD再获取一个TSO。TiDB提交事务时，将后者TSO作为事务的完成时间，交给PD判断多个事务的先后顺序。而因果一致性事务不会产生第2个TSO，直接将第1个TSO作为事务的完成时间，减少了TSO交互的网络IO，具有更低的COMMIT延迟。因果一致性事务的启动方式：BEGIN WITH CAUSAL CONSISTENCY ONLY。
+
+悲观事务的启动方式：BEGIN（默认用的就是悲观）。乐观事务的启动方式：BEGIN OPTIMISTIC。
+
+悲观事务下，事务A对行H的写操作会占用锁，事务B无法写行H，这个特性和MySQL一样。
+
+乐观事务下，事务B可以写H，**但事务A提交的时候，会抛出写冲突异常**，有点类似[Easticsearch的并发写异常](https://github.com/9029HIME/Emphasis/blob/master/project_emphasis/src/main/mds/27-%E5%BC%80%E5%8F%91%E7%BB%8F%E9%AA%8C-Elasticsearch%E7%9A%84%E8%AE%BE%E8%AE%A1%E5%93%B2%E5%AD%A6%E4%B8%8E%E5%B9%B6%E5%8F%91%E5%86%99%E7%9A%84%E5%86%B2%E7%AA%81.md)。需要在代码层面考虑冲突后的降级处理。
+
+
+
