@@ -13,7 +13,7 @@
 
 **至于TiDB，它选择了后者，采用划分范围的方式，将每一行（KV）存储到不同的Region上。**
 
-图1
+![01](05-再谈Region.assets/01.png)
 
 对于TiDB来说，Key是可排序的，TiKV将一段连续的KV存入Region，直至达到阈值则产生Region分裂，1个Node只有1个Region，多个Region会均匀分布到不同TiKV上，rebalance动作由PD触发。默认情况下，所有的读和写都是通过 Leader 进行，读操作在 Leader 上即可完成，而写操作再由 Leader 复制给 Follower（和Kafka Cluster一致）。
 
@@ -23,7 +23,7 @@
 
 然而在创建表之后，TiDB只会给表分配1个Region，**在表使用非聚簇索引主键或不使用主键时， TIDB也会给每一行分配一个`_tidb_rowid` 列作为行 ID，并用行ID生成一个隐式的聚簇索引**，在不使用 SHARD_ROW_ID_BITS 的情况下，_tidb_rowid 列的值基本也为单调递增。也就是说，在默认情况下，TiDB的Region热点写入问题十分普遍，**这个问题也很符合TiDB使用Key范围来定位数据所在Region的方式。**
 
-图2
+![02](../../../Desktop/02.png)
 
 随着数据持续写入，TiKV 会将一个 Region 切分为多个。但因为首先发起选举的是原 Leader 所在的Node1，所以新切分好的两个Region Leader 很可能还会在Node1。新切分好的 Region 2，3 上，也会重复之前发生在 Region 1上的过程。也就是压力会密集地集中在Node1 上。
 
@@ -45,5 +45,10 @@
 1. 使用非自增聚簇索引主键。
 2. 不使用聚簇索引主键，但使用SHARD_ROW_ID_BITS。
 
-TODO
+在不使用聚簇索引主键并使用SHARD_ROW_ID_BITS后，TiDB可以把row_id打散写入多个不同的 Region，缓解写入热点问题。但是！SHARD_ROW_ID_BITS 的值可以动态修改，每次修改之后，只对新写入的数据生效。这也是不容忽视的避免，并且通常情况下，项目会使用聚簇索引主键，因此这个方案显得有点尴尬。
 
+# 数据定位和热点写的思考
+
+从Sharding Proxy、Redis Cluster、Kafka Cluster，再到目前的TiDB，分布式数据定位的矛盾总是围绕着“按范围有热点写入问题，按分片有数据扩容问题”展开。TiDB采用了前者，并且官网也强调了许多热点写的注意事项，看得出来是为了保证“分布式数据库”的可扩容性。
+
+TiKV会根据Region的最大值进行分裂，新的数据会写入于分裂出来的新Region。由TiKV的分裂机制 + 上报分裂行为给PD + Region迁移到TiKV其他这3个操作，平衡了Region在TiDB Cluster的可扩展性和读写均衡带来的优缺点。
